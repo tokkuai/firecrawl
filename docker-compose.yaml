@@ -9,12 +9,12 @@ x-common-service: &common-service
     - "host.docker.internal:host-gateway"
 
 x-common-env: &common-env
-  # ---- Internal service wiring (keep defaults unless you change ports) ----
+  # ---- Internal service wiring ----
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   REDIS_RATE_LIMIT_URL: ${REDIS_RATE_LIMIT_URL:-redis://redis:6379}
   PLAYWRIGHT_MICROSERVICE_URL: ${PLAYWRIGHT_MICROSERVICE_URL:-http://playwright-service:${PLAYWRIGHT_PORT:-3000}/scrape}
 
-  # ---- Auth OFF (Firecrawl self-host uses Supabase if you ever enable it) ----
+  # ---- Auth (Supabase only if enabled) ----
   USE_DB_AUTHENTICATION: ${USE_DB_AUTHENTICATION}
 
   # ---- AI (OpenAI) ----
@@ -34,7 +34,6 @@ services:
       PORT: ${PLAYWRIGHT_PORT:-3000}
       BLOCK_MEDIA: ${BLOCK_MEDIA}
     networks: [backend]
-    # (No host port by default; API calls it via Docker network)
 
   api:
     <<: *common-service
@@ -45,10 +44,11 @@ services:
       FLY_PROCESS_GROUP: app
       ENV: local
     depends_on: [redis, playwright-service]
-    # Expose API by host port (no Traefik labels). Change via env only.
-    ports:
-      - "${API_HOST_PORT:-3002}:${INTERNAL_PORT:-3002}"
+    # No host port mapping; Dokploy's Traefik will reach it via dokploy-network
     command: ["pnpm","run","start:production"]
+    networks:
+      - backend
+      - dokploy-network
 
   worker:
     <<: *common-service
@@ -63,7 +63,6 @@ services:
     image: redis:alpine
     command: ["redis-server","--bind","${REDIS_BIND:-0.0.0.0}","--port","${REDIS_PORT:-6379}"]
     networks: [backend]
-    # Internal only (no host port). API/worker reach at redis:6379
 
   postgres:
     image: postgres:15-alpine
@@ -74,13 +73,15 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks: [backend]
-    # Optional host access for tools (pgAdmin). Set POSTGRES_HOST_PORT or leave empty to skip.
-    ports:
-      - "${POSTGRES_HOST_PORT:-5432}:${POSTGRES_CONTAINER_PORT:-5432}"
+    # (Optional) If you want pgAdmin from outside, expose a host port via env:
+    # ports:
+    #   - "${POSTGRES_HOST_PORT:-5432}:${POSTGRES_CONTAINER_PORT:-5432}"
 
 networks:
   backend:
     driver: bridge
+  dokploy-network:
+    external: true
 
 volumes:
   postgres_data:
